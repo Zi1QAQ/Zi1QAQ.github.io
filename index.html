@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8" name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>CS:GO选手筛选工具</title>
+    <title>CS:GO选手自动筛选工具</title>
     <style>
         body { font-family: Arial, sans-serif; padding: 20px; }
         .filter-section { margin-bottom: 20px; background: #f5f5f5; padding: 15px; border-radius: 8px; }
@@ -12,32 +12,48 @@
         table { width: 100%; border-collapse: collapse; }
         th, td { padding: 8px; border: 1px solid #ddd; text-align: left; }
         th { background-color: #f0f0f0; }
-        /* 移动端优化样式 */
+        input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
+        select, input { 
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            touch-action: manipulation;
+        }
+        .sortable { cursor: pointer; position: relative; }
+        .sortable:hover { background-color: #e0e0e0; }
+        .sort-arrow { 
+            position: absolute;
+            right: 8px;
+            font-size: 12px;
+            color: #666;
+        }
+
         @media (max-width: 600px) {
             .filter-group label { 
                 width: 80px; 
                 font-size: 14px;
             }
             select, input {
-                padding: 8px;
+                width: 45% !important;
                 font-size: 14px;
             }
             table {
                 font-size: 12px;
+                overflow-x: auto;
+                display: block;
             }
         }
     </style>
 </head>
 <body>
     <div class="filter-section">
-        <h2>筛选条件</h2>
+        <h2>实时筛选条件</h2>
         <div class="filter-group">
             <label>位置：</label>
             <select id="position">
                 <option value="">全部</option>
                 <option value="rifler">步枪手</option>
                 <option value="awper">狙击手</option>
-                <option value="IGL">指挥</option>
             </select>
         </div>
         <div class="filter-group">
@@ -57,22 +73,19 @@
             <label>国家：</label>
             <select id="country">
                 <option value="">全部</option>
-                <!-- 动态生成 -->
             </select>
         </div>
-        <!-- 新增战队筛选 -->
         <div class="filter-group">
             <label>战队：</label>
             <select id="team">
                 <option value="">全部</option>
-                <!-- 动态生成 -->
             </select>
         </div>
         <div class="filter-group">
             <label>年龄范围：</label>
-            <input type="number" id="minAge" placeholder="最小年龄" style="width: 80px;">
+            <input type="number" id="minAge" placeholder="最小" style="width: 80px;">
             至
-            <input type="number" id="maxAge" placeholder="最大年龄" style="width: 80px;">
+            <input type="number" id="maxAge" placeholder="最大" style="width: 80px;">
         </div>
         <div class="filter-group">
             <label>Major次数：</label>
@@ -80,12 +93,11 @@
             至
             <input type="number" id="maxMajors" placeholder="最多" style="width: 80px;">
         </div>
-        <button onclick="filterPlayers()">筛选</button>
     </div>
     <div id="results"></div>
 
     <script>
-        // 国家缩写映射表
+        // 国家缩写映射
         const countryMap = {
             "BA": "波黑",
             "ES": "西班牙",
@@ -131,7 +143,7 @@
             "MK": "北马其顿"
         };
 
-        // 选手数据（保持原始缩写）
+        // 示例选手数据（需替换为真实数据）
         const players = [
             [
               "NiKo",
@@ -2610,6 +2622,9 @@
             ]
         ];
 
+        // 排序状态管理
+        let currentSort = { column: null, direction: 'asc' };
+
         // 初始化筛选选项
         function initFilters() {
             // 初始化国家选项
@@ -2620,71 +2635,179 @@
                     const option = new Option(countryMap[code] || code, code);
                     countrySelect.add(option);
                 });
-            // 初始化战队选项（新增部分）
+
+            // 初始化战队选项
             const teamSelect = document.getElementById('team');
-            [...new Set(players.map(p => p[1]))] // 提取所有战队名称
+            [...new Set(players.map(p => p[1]))]
                 .sort((a, b) => a.localeCompare(b))
                 .forEach(team => {
                     const option = new Option(team, team);
                     teamSelect.add(option);
                 });
+
+            // 事件监听
+            const filterElements = [
+                'position', 'region', 'country', 'team',
+                'minAge', 'maxAge', 'minMajors', 'maxMajors'
+            ];
+            
+            filterElements.forEach(id => {
+                const element = document.getElementById(id);
+                if (id.startsWith('min') || id.startsWith('max')) {
+                    element.addEventListener('input', debounce(filterPlayers, 300));
+                    element.addEventListener('change', filterPlayers);
+                } else {
+                    element.addEventListener('change', filterPlayers);
+                }
+            });
         }
-        function filterPlayers() {
-            // 获取所有筛选条件
-            const filters = {
-                position: document.getElementById('position').value,
-                region: document.getElementById('region').value,
-                country: document.getElementById('country').value,
-                team: document.getElementById('team').value,
-                minAge: parseInt(document.getElementById('minAge').value) || 0,
-                maxAge: parseInt(document.getElementById('maxAge').value) || 100,
-                minMajors: parseInt(document.getElementById('minMajors').value) || 0,
-                maxMajors: parseInt(document.getElementById('maxMajors').value) || 100
+
+        // 防抖函数
+        function debounce(func, wait) {
+            let timeout;
+            return function(...args) {
+                clearTimeout(timeout);
+                timeout = setTimeout(() => func.apply(this, args), wait);
             };
-            // 执行筛选
-            const filtered = players.filter(player => 
-                (!filters.position || player[5] === filters.position) &&
-                (!filters.region || player[3] === filters.region) &&
-                (!filters.country || player[2] === filters.country) &&
-                (!filters.team || player[1] === filters.team) &&
-                (parseInt(player[4]) >= filters.minAge) &&
-                (parseInt(player[4]) <= filters.maxAge) &&
-                (parseInt(player[6]) >= filters.minMajors) &&
-                (parseInt(player[6]) <= filters.maxMajors)
-            );
-            displayResults(filtered);
         }
+
+        // 筛选逻辑
+        function filterPlayers() {
+            const getValue = id => document.getElementById(id).value;
+            const getNumber = id => {
+                const val = parseInt(getValue(id));
+                return isNaN(val) ? (id.startsWith('min') ? 0 : 100) : val;
+            };
+
+            const minAge = getNumber('minAge');
+            const maxAge = getNumber('maxAge');
+            const minMajors = getNumber('minMajors');
+            const maxMajors = getNumber('maxMajors');
+
+            if (minAge > maxAge || minMajors > maxMajors) return;
+
+            const filtered = players.filter(player => 
+                (!getValue('position') || player[5] === getValue('position')) &&
+                (!getValue('region') || player[3] === getValue('region')) &&
+                (!getValue('country') || player[2] === getValue('country')) &&
+                (!getValue('team') || player[1] === getValue('team')) &&
+                (player[4] >= minAge) &&
+                (player[4] <= maxAge) &&
+                (player[6] >= minMajors) &&
+                (player[6] <= maxMajors)
+            );
+
+            sortTable(currentSort.column || 0); // 保持当前排序状态
+        }
+
+        // 渲染结果
         function displayResults(data) {
             const resultsDiv = document.getElementById('results');
             resultsDiv.innerHTML = data.length === 0 ? 
-                "没有找到符合条件的选手" : 
+                `<div style="color:#999; text-align:center; padding:20px;">没有找到符合条件的选手</div>` : 
                 `<table>
-                    <tr>
-                        <th>选手名</th>
-                        <th>战队</th>
-                        <th>国家</th>
-                        <th>赛区</th>
-                        <th>年龄</th>
-                        <th>位置</th>
-                        <th>Major次数</th>
-                    </tr>
-                    ${data.map(player => `
+                    <thead>
                         <tr>
-                            <td>${player[0]}</td>
-                            <td>${player[1]}</td>
-                            <td>${countryMap[player[2]] || player[2]}</td>
-                            <td>${player[3]}</td>
-                            <td>${player[4]}</td>
-                            <td>${player[5] === 'awper' ? '狙击手' : 
-                                  player[5] === 'IGL' ? '指挥' : '步枪手'}</td>
-                            <td>${player[6]}</td>
-                        </tr>`
-                    ).join('')}
+                            ${['选手名', '战队', '国家', '赛区', '年龄', '位置', 'Major次数']
+                                .map((title, index) => `
+                                    <th class="sortable" onclick="sortTable(${index})">
+                                        ${title}
+                                        ${currentSort.column === index ? 
+                                            `<span class="sort-arrow">${currentSort.direction === 'asc' ? '↑' : '↓'}</span>` : 
+                                            ''}
+                                    </th>`)
+                                .join('')}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${data.map(player => `
+                            <tr>
+                                <td>${player[0]}</td>
+                                <td>${player[1]}</td>
+                                <td>${countryMap[player[2]] || player[2]}</td>
+                                <td>${player[3]}</td>
+                                <td>${player[4]}</td>
+                                <td>${player[5] === 'awper' ? '狙击手' : '步枪手'}</td>
+                                <td>${player[6]}</td>
+                            </tr>`
+                        ).join('')}
+                    </tbody>
                 </table>`;
         }
-        // 初始化页面
-        initFilters();
-        filterPlayers();
+
+
+        // 排序功能
+        function sortTable(columnIndex) {
+            // 获取当前展示的原始数据（已筛选后的数据）
+            const currentData = getFilteredData();
+            
+            // 切换排序方向
+            if (currentSort.column === columnIndex) {
+                currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+                currentSort.column = columnIndex;
+                currentSort.direction = 'asc';
+            }
+            // 执行排序（直接对数据进行排序）
+            const sortedData = currentData.sort((a, b) => {
+                const aVal = a[columnIndex];
+                const bVal = b[columnIndex];
+                
+                // 特殊列处理
+                switch(columnIndex) {
+                    case 4:  // 年龄
+                    case 6:  // Major次数
+                        return (aVal - bVal) * (currentSort.direction === 'asc' ? 1 : -1);
+                    case 2:  // 国家（直接使用原始代码）
+                        return a[2].localeCompare(b[2]) * (currentSort.direction === 'asc' ? 1 : -1);
+                    case 0:  // 选手名
+                    case 1:  // 战队
+                    case 3:  // 赛区
+                        return String(aVal).localeCompare(String(bVal), 'zh-Hans-CN') * (currentSort.direction === 'asc' ? 1 : -1);
+                    case 5:  // 位置
+                        return String(aVal === 'awper' ? '狙击手' : '步枪手').localeCompare(
+                               String(bVal === 'awper' ? '狙击手' : '步枪手')) * (currentSort.direction === 'asc' ? 1 : -1);
+                    default:
+                        return 1;
+                }
+            });
+            // 重新渲染排序后的数据
+            displayResults(sortedData);
+        }
+
+
+        // 获取当前筛选数据
+        function getFilteredData() {
+            return players.filter(player => {
+                const getValue = id => document.getElementById(id).value;
+                const minAge = parseInt(document.getElementById('minAge').value) || 0;
+                const maxAge = parseInt(document.getElementById('maxAge').value) || 100;
+                const minMajors = parseInt(document.getElementById('minMajors').value) || 0;
+                const maxMajors = parseInt(document.getElementById('maxMajors').value) || 100;
+
+                return (!getValue('position') || player[5] === getValue('position')) &&
+                    (!getValue('region') || player[3] === getValue('region')) &&
+                    (!getValue('country') || player[2] === getValue('country')) &&
+                    (!getValue('team') || player[1] === getValue('team')) &&
+                    (player[4] >= minAge) &&
+                    (player[4] <= maxAge) &&
+                    (player[6] >= minMajors) &&
+                    (player[6] <= maxMajors);
+            });
+        }
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            initFilters();
+            filterPlayers();
+        });
+
+        // 移动端优化
+        document.addEventListener('touchstart', function(e) {
+            if (e.target.tagName === 'INPUT') {
+                e.target.focus({ preventScroll: true });
+            }
+        });
     </script>
 </body>
 </html>
